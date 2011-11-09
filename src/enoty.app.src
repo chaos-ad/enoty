@@ -1,0 +1,14 @@
+%% -*- erlang -*-
+{application, enoty,
+ [
+  {description, "Notification sender for social networks"},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  social_api
+                 ]},
+  {mod, { enoty_app, []}},
+  {env, []}
+ ]}.
