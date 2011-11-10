@@ -27,7 +27,7 @@ stop(Reason) ->
     gen_server:call(?SERVER, {stop, Reason}).
 
 send(Message, Users, Timeout) ->
-    gen_server:call(?SERVER, {send, Message, Users}, Timeout).
+    gen_server:call(?SERVER, {send, unicode:characters_to_binary(Message), Users}, Timeout).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -39,24 +39,34 @@ handle_call({stop, Reason}, _, State) ->
     {stop, Reason, State};
 
 handle_call({send, Message, Users}, _, odnoklassniki=Net) ->
-    lists:foreach
+    Result =
+    lists:foldl
     (
-        fun(UserID) -> do_send(Net, Message, UserID) end,
+        fun(UsersPortion, Result) -> [do_send(Net, Message, UsersPortion)|Result] end,
+        [],
         Users
     ),
-    {reply, ok, Net};
+    {reply, lists:concat(lists:reverse(Result)), Net};
 
 handle_call({send, Message, Users}, _, vkontakte=Net) ->
-    lists:foreach
+    Result =
+    lists:foldl
     (
-        fun(UsersPortion) -> do_send(Net, Message, UsersPortion) end,
+        fun(UsersPortion, Result) -> [do_send(Net, Message, UsersPortion)|Result] end,
+        [],
         split(100, Users)
     ),
-    {reply, ok, Net};
+    {reply, lists:concat(lists:reverse(Result)), Net};
 
 handle_call({send, Message, Users}, _, mymail=Net) ->
-    do_send(Net, Message, Users),
-    {reply, ok, Net};
+    Result =
+    lists:foldl
+    (
+        fun(UsersPortion, Result) -> [do_send(Net, Message, UsersPortion)|Result] end,
+        [],
+        split(200, Users)
+    ),
+    {reply, lists:concat(lists:reverse(Result)), Net};
 
 handle_call(_, _, State) ->
     {noreply, ok, State}.
@@ -89,34 +99,41 @@ do_send(mymail=Net, Message, Users) when is_list(Users) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-handle_response(odnoklassniki, _, _, true) -> ok;
-handle_response(odnoklassniki, _, UserID, {struct,[_, _, {<<"error_msg">>, Msg}]}) ->
-    io:format("Sending to ~p: ~p~n", [UserID, Msg]);
-handle_response(odnoklassniki, _, UserID, Result) ->
-    io:format("Sending to ~p: ~p~n", [UserID, Result]);
+handle_response(odnoklassniki, _, UserID, true) -> [{to_integer(UserID), ok}];
+handle_response(odnoklassniki, _, UserID, {struct,ErrorInfo}) ->
+    Code = proplists:get_value(<<"error_code">>, ErrorInfo),
+    ErrMsg = proplists:get_value(<<"error_msg">>, ErrorInfo),
+    [{to_integer(UserID), {error, {Code, ErrMsg}}}];
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 handle_response(vkontakte, _, Users, {struct,[{<<"response">>,Result}]}) ->
-    Undelivered = get_undelivered(Users, Result),
-    lists:foreach(fun(ID) -> io:format("Sending to ~p: undelivered~n", [ID]) end, Undelivered);
+    {Delivered, Undelivered} = split_delivered(Users, Result),
+    lists:zip(Delivered, lists:duplicate(length(Delivered), ok)) ++
+    lists:zip(Undelivered, lists:duplicate(length(Undelivered), {error, undelivered}));
 
 handle_response(vkontakte, Msg, Users, {struct, [{<<"error">>, {struct, ErrorInfo}}]}) ->
-    case proplists:get_value(<<"error_code">>, ErrorInfo) of
-        6 ->
+    Code = proplists:get_value(<<"error_code">>, ErrorInfo),
+    case Code =:= 6 of
+        true  ->
             timer:sleep(250),
             do_send(vkontakte, Msg, Users);
-        _ ->
-            Result = proplists:get_value(<<"error_msg">>, ErrorInfo),
-            io:format("Sending to ~p: ~p~n", [Users, Result])
+        false ->
+            ErrMsg = proplists:get_value(<<"error_msg">>, ErrorInfo),
+            lists:zip(Users, lists:duplicate(length(Users), {error, {Code, ErrMsg}}))
     end;
-handle_response(vkontakte, _, Users, Result) ->
-    io:format("Sending to ~p: ~p~n", [Users, Result]);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-handle_response(mymail, _, Users, Result) ->
-    io:format("Sending to ~p: ~p~n", [Users, Result]).
+handle_response(mymail, _, Users, {struct, [{<<"error">>, {struct, ErrorInfo}}]}) ->
+    Code = proplists:get_value(<<"error_code">>, ErrorInfo),
+    ErrMsg = proplists:get_value(<<"error_msg">>, ErrorInfo),
+    lists:zip(Users, lists:duplicate(length(Users), {error, {Code, ErrMsg}}));
+
+handle_response(mymail, _, Users, Result) when is_list(Result) ->
+    {Delivered, Undelivered} = split_delivered(Users, Result),
+    lists:zip(Delivered, lists:duplicate(length(Delivered), ok)) ++
+    lists:zip(Undelivered, lists:duplicate(length(Undelivered), {error, undelivered})).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -132,10 +149,15 @@ split(N, List, Res) when is_list(List), length(List)  > N ->
 
 uids2string(List) when is_list(List) -> social_api_utils:concat(List, $,).
 
-get_undelivered(Users, Result) when is_binary(Result) ->
-    List1 = lists:map(fun to_integer/1, Users),
-    List2 = lists:map(fun to_integer/1, string:tokens(binary_to_list(Result), ",")),
-    ordsets:subtract(ordsets:from_list(lists:sort(List1)), ordsets:from_list(lists:sort(List2))).
+split_delivered(Users, Result) when is_binary(Result) ->
+    split_delivered(Users, string:tokens(binary_to_list(Result), ","));
+
+split_delivered(Users, Result) when is_list(Result) ->
+    List1 = ordsets:from_list(lists:sort(lists:map(fun to_integer/1, Users))),
+    List2 = ordsets:from_list(lists:sort(lists:map(fun to_integer/1, Result))),
+    Undelivered = ordsets:subtract(List1, List2),
+    Delivered = ordsets:subtract(List1, Undelivered),
+    {Delivered, Undelivered}.
 
 to_integer(Int) when is_integer(Int) -> Int;
 to_integer(List) when is_list(List) -> list_to_integer(List);
