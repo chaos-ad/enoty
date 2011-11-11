@@ -7,7 +7,7 @@
   {applications, [
                   kernel,
                   stdlib,
-                  social_api
+                  social_net_api
                  ]},
   {mod, { enoty_app, []}},
   {env, []}

@@ -86,15 +86,15 @@ code_change(_, State, _) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 do_send(odnoklassniki=Net, Message, UserID) ->
-    Res = social_api:invoke_method({notifications, sendSimple}, [{uid, UserID}, {text, Message}]),
+    Res = social_net_api:invoke_method({notifications, sendSimple}, [{uid, UserID}, {text, Message}]),
     handle_response(Net, Message, UserID, Res);
 
 do_send(vkontakte=Net, Message, Users) when is_list(Users) ->
-    Res = social_api:invoke_method({secure, sendNotification}, [{uids, uids2string(Users)}, {message, Message}]),
+    Res = social_net_api:invoke_method({secure, sendNotification}, [{uids, uids2string(Users)}, {message, Message}]),
     handle_response(Net, Message, Users, Res);
 
 do_send(mymail=Net, Message, Users) when is_list(Users) ->
-    Res = social_api:invoke_method({notifications, send}, [{uids, uids2string(Users)}, {text, Message}]),
+    Res = social_net_api:invoke_method({notifications, send}, [{uids, uids2string(Users)}, {text, Message}]),
     handle_response(Net, Message, Users, Res).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -147,7 +147,7 @@ split(N, List, Res) when is_list(List), length(List)  > N ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-uids2string(List) when is_list(List) -> social_api_utils:concat(List, $,).
+uids2string(List) when is_list(List) -> social_net_api_utils:concat(List, $,).
 
 split_delivered(Users, Result) when is_binary(Result) ->
     split_delivered(Users, string:tokens(binary_to_list(Result), ","));
